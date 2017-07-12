@@ -1,0 +1,174 @@
+#!/usr/bin/env python
+
+import os
+import re
+import stat
+import argparse
+import subprocess
+
+BASE_DIR = os.path.join(os.path.expanduser('~'), '.chunkwm')
+PROFILE_DIR = os.path.join(BASE_DIR, 'profiles')
+CHUNKWMRC_TMPL = os.path.join(BASE_DIR, 'chunkwmrc.tmpl')
+CHUNKWMRC = os.path.join(os.path.expanduser('~'), '.chunkwmrc')
+KHDRC_TMPL = os.path.join(BASE_DIR, 'khdrc.tmpl')
+KHDRC = os.path.join(os.path.expanduser('~'), '.khdrc')
+
+DESKTOPS = {
+    'laptop': {
+        1: 'terminal',
+        2: 'crisidev_irc',
+        3: 'crisidev_web',
+        4: 'amzn_irc',
+        5: 'amzn_web',
+        6: 'devel',
+        7: 'outlook',
+        8: 'calendar',
+        9: 'chime',
+        10: 'phone',
+        11: 'various2',
+        12: 'various3',
+        -1: 'unknown'
+    },
+    '3monitor': {
+    }
+}
+
+ACTIVE_WINDOW_SCRIPT = """
+global frontApp, frontAppName, windowTitle
+
+set windowTitle to ""
+tell application "System Events"
+    set frontApp to first application process whose frontmost is true
+    set frontAppName to name of frontApp
+    tell process frontAppName
+        tell (1st window whose value of attribute "AXMain" is true)
+            set windowTitle to value of attribute "AXTitle"
+        end tell
+    end tell
+end tell
+
+return {frontAppName & " - " & windowTitle}
+"""
+
+
+def get_profiles():
+    return set([x.split('.').pop(0) for x in os.listdir(PROFILE_DIR)])
+
+
+def write_file(content, path):
+    with open(path, 'w') as fd:
+        fd.write(content)
+
+
+def read_file(path):
+    with open(path, 'r') as fd:
+        return fd.read()
+
+
+def get_active_profile():
+    content = read_file(CHUNKWMRC)
+    search = re.search(r"# active_profile: (\w+)", content)
+    if search:
+        return search.groups()[0]
+    return None
+
+
+def generate_file_content(profile, template):
+    content = read_file(template)
+    return content.format(profile)
+
+
+def run_notifier(message):
+    args = ['/usr/local/bin/terminal-notifier', '-sender', 'com.apple.exposelauncher',
+            '-title', 'Chunkwm', '-message', message]
+    subprocess.check_call(args)
+
+
+def write_chunkwmrc(profile):
+    content = generate_file_content(profile, CHUNKWMRC_TMPL)
+    write_file(content, CHUNKWMRC)
+    st = os.stat(CHUNKWMRC)
+    os.chmod(CHUNKWMRC, st.st_mode | stat.S_IEXEC)
+
+
+def restart_chunkwm():
+    args = ['brew', 'services', 'restart', 'chunkwm']
+    subprocess.check_call(args)
+
+
+def write_khdrc(profile):
+    template = read_file(KHDRC_TMPL)
+    profile_file = os.path.join(PROFILE_DIR, '{}.bindings'.format(profile))
+    bindings = read_file(profile_file)
+    write_file("{}\n{}".format(template, bindings), KHDRC)
+
+
+def reload_khd():
+    args = ['/usr/local/bin/khd', '-e', 'reload']
+    subprocess.check_call(args)
+
+
+def get_active_desktop():
+    res = -1
+    try:
+        p = subprocess.Popen(['/usr/local/bin/chunkc', 'get', '_active_desktop'],
+                             stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE)
+        stdout, _ = p.communicate()
+        if not p.returncode:
+            try:
+                res = int(stdout)
+            except ValueError:
+                res = -1
+    except Exception:
+        res = -1
+    return res
+
+
+def get_active_window():
+    try:
+        p = subprocess.Popen(['osascript', '-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE)
+        stdout, _ = p.communicate(ACTIVE_WINDOW_SCRIPT.encode('utf-8'))
+        if not p.returncode:
+            return stdout.decode('utf-8')
+        return 'unknown'
+    except Exception:
+        return "unknown"
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(prog='chunkwm-profile')
+    parser.add_argument('-p', '--profile', help="select profile", choices=get_profiles())
+    parser.add_argument('-l', '--list', help="list profiles", default=False, action='store_true')
+    parser.add_argument('-a', '--autoswitch', help="autoswitch profile based on bluetooth presence",
+                        default=False, action='store_true')
+    parser.add_argument('-d', '--desktop', help="query active desktop", default=False, action='store_true')
+    parser.add_argument('-w', '--window', help="query active window", default=False, action='store_true')
+    return parser.parse_args()
+
+
+def main():
+    args = parse_args()
+    if args.list:
+        for profile in get_profiles():
+            print('* {}'.format(profile))
+    elif args.profile:
+        run_notifier("Switching to profile {}".format(args.profile))
+        write_chunkwmrc(args.profile)
+        write_khdrc(args.profile)
+        reload_khd()
+        restart_chunkwm()
+        run_notifier("Activated new profile: {}".format(args.profile))
+    elif args.autoswitch:
+        pass
+    elif args.desktop:
+        print(DESKTOPS.get(get_active_profile(), {}).get(get_active_desktop()))
+    elif args.window:
+        print(get_active_window())
+    else:
+        print(get_active_profile())
+
+
+if __name__ == '__main__':
+    main()

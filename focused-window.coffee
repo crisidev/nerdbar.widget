@@ -1,6 +1,6 @@
-command: "$HOME/.bin/chunkwm-query -w"
+command: "$HOME/.bin/chunkwm-profile -w"
 
-refreshFrequency: 1000
+refreshFrequency: 2000
 
 render: (output) ->
   """

@@ -1,6 +1,6 @@
-command: "$HOME/.bin/chunkwm-query -d"
+command: "$HOME/.bin/chunkwm-profile -d"
 
-refreshFrequency: 1000
+refreshFrequency: 2000
 
 render: (output) ->
   """
@@ -39,6 +39,8 @@ icon: (output) =>
         "fa-calendar"
     else if output == "biba\n"
         "fa-comments"
+    else if output == "devel\n"
+        "fa-git"
     else
         "fa-superpowers"
 
